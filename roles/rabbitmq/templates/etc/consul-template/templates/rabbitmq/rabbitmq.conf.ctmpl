@@ -12,3 +12,13 @@ cluster_formation.consul.svc_addr_auto = true
 cluster_formation.consul.svc_addr_use_nodename = false
 cluster_formation.consul.use_longname = true
 cluster_formation.node_cleanup.only_log_warning = true
+
+management.hsts.policy = max-age=16000000;
+management.headers.content_type_options = nosniff
+management.headers.xss_protection = 1; mode=block
+management.headers.frame_options = DENY
+
+management.ssl.port       = 15671
+management.ssl.cacertfile = /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+management.ssl.certfile   = /etc/rabbitmq/rabbitmq-cluster-server.crt
+management.ssl.keyfile    = /etc/rabbitmq/rabbitmq-cluster-server.key
