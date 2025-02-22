@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+# Consul Template Managed - rabbitmq
+{% raw %}{{ $myRabbitMQCluster := (mustEnv "CONSUL_ROLE") }}{% endraw %}
+
+cluster_name = {% raw %}{{ $myRabbitMQCluster }}{% endraw %}
+cluster_partition_handling = pause_minority
+
+cluster_formation.peer_discovery_backend = consul
+cluster_formation.consul.lock_prefix = {% raw %}{{ $myRabbitMQCluster }}{% endraw %}
+cluster_formation.consul.svc = {% raw %}{{ $myRabbitMQCluster }}{% endraw %}
+cluster_formation.consul.svc_addr_auto = true
+cluster_formation.consul.svc_addr_use_nodename = false
+cluster_formation.consul.use_longname = true
+cluster_formation.node_cleanup.only_log_warning = true

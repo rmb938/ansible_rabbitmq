@@ -103,7 +103,48 @@
     group: rabbitmq
     mode: "0700"
 
-- name: Enable RabbitMQ Plugins
+- name: Own rabbitmq config dir
+  ansible.builtin.file:
+    path: /etc/rabbitmq/
+    owner: rabbitmq
+    group: rabbitmq
+    mode: "0700"
+
+- name: Create RabbitMQ Cluster Server Certificates
+  ansible.builtin.command: >-
+    step ca certificate {{ ansible_fqdn }}
+    /etc/rabbitmq/rabbitmq-cluster-server.crt
+    /etc/rabbitmq/rabbitmq-cluster-server.key
+    --ca-url https://step-ca.us-homelab1.hl.rmb938.me:8443
+    --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+  args:
+    creates: "/etc/rabbitmq/rabbitmq-cluster-server.crt"
+
+- name: Own RabbitMQ Cluster Server Certificates
+  ansible.builtin.file:
+    path: /etc/rabbitmq/{{ item }}
+    owner: rabbitmq
+    group: rabbitmq
+    mode: "0600"
+  with_items:
+    - rabbitmq-cluster-server.crt
+    - rabbitmq-cluster-server.key
+
+- name: Cron to renew RabbitMQ Cluster Server Certificates
+  ansible.builtin.cron:
+    name: "renew rabbitmq cluster certificates"
+    special_time: "hourly"
+    # Rekey needs to happen against the CA, RA's don't support rekey
+    # https://smallstep.com/docs/step-ca/registration-authority-ra-mode/#stepcas-limitations
+    job: >-
+      step ca rekey /etc/rabbitmq/rabbitmq-cluster-server.crt
+      /etc/rabbitmq/rabbitmq-cluster-server.key
+      --ca-url https://step-ca.us-homelab1.hl.rmb938.me
+      --root /usr/local/share/ca-certificates/smallstep-homelab-prod.crt
+      --force --expires-in 720h --exec "systemctl try-reload-or-restart rabbitmq-server"
+    state: present
+
+- name: RabbitMQ Plugins
   ansible.builtin.template:
     src: etc/rabbitmq/enabled_plugins
     dest: /etc/rabbitmq/enabled_plugins
@@ -112,7 +153,19 @@
     group: rabbitmq
   register: rabbitmq_plugins
 
-- name: Enable RabbitMQ Env
+- name: Make Sure Erlang SSL Exists
+  ansible.builtin.stat:
+    # This will change between erlang versions so we want this to fail
+    # if it doesn't
+    path: /usr/lib/erlang/lib/ssl-11.2.7/ebin
+  register: erlang_ssl
+
+- name: Failing if Erlang SSL doesn't exist # noqa: no-handler
+  ansible.builtin.fail:
+    msg: "Erlang SSL folder doesn't exist, version may have changed."
+  when: not erlang_ssl.stat.exists
+
+- name: RabbitMQ Env
   ansible.builtin.template:
     src: etc/rabbitmq/rabbitmq-env.conf
     dest: /etc/rabbitmq/rabbitmq-env.conf
@@ -121,31 +174,99 @@
     group: rabbitmq
   register: rabbitmq_env
 
-- name: Enable RabbitMQ Config
+- name: RabbitMQ Inter Node TLS Config
   ansible.builtin.template:
-    src: etc/rabbitmq/rabbitmq.conf
-    dest: /etc/rabbitmq/rabbitmq.conf
+    src: etc/rabbitmq/inter_node_tls.config
+    dest: /etc/rabbitmq/inter_node_tls.config
     mode: "0600"
     owner: rabbitmq
     group: rabbitmq
-  register: rabbitmq_config
+  register: rabbitmq_inter_node_tls_config
+# End RabbitMQ
 
-- name: Erlang Cookie
+# Start Consul Template RabbitMQ
+- name: Add rabbitmq to sudoers
+  community.general.sudoers:
+    name: rabbitmq
+    user: rabbitmq
+    nopassword: true
+    validation: required
+    commands:
+      - /usr/bin/systemctl reload-or-restart rabbitmq-server
+    state: present
+
+- name: Configure Consul Template for RabbitMQ
+  ansible.builtin.template:
+    src: etc/consul-template/consul-template-rabbitmq.hcl
+    dest: /etc/consul-template/consul-template-rabbitmq.hcl
+    mode: "0644"
+    owner: rabbitmq
+    group: rabbitmq
+  register: consul_template_rabbitmq_config
+
+- name: Create Consul Template for RabbitMQ Templates directory
+  ansible.builtin.file:
+    path: /etc/consul-template/templates/rabbitmq/
+    state: directory
+    mode: "0744"
+    owner: rabbitmq
+    group: rabbitmq
+
+- name: Place Consul Template for RabbitMQ Templates Files
   ansible.builtin.copy:
-    # TODO: move to a consul template
-    content: "this-is-my-random-erlang-cookie"
-    dest: /var/lib/rabbitmq/.erlang.cookie
-    mode: "0600"
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/rabbitmq/{{ item | basename }}"
+    mode: "0644"
     owner: rabbitmq
     group: rabbitmq
-  register: rabbitmq_cookie
+  with_fileglob:
+    - ../files/etc/consul-template/templates/rabbitmq/*.ctmpl
+  register: consul_template_rabbitmq_templates_files
 
+- name: Place Consul Template for RabbitMQ Templates Templates
+  ansible.builtin.template:
+    src: "{{ item }}"
+    dest: "/etc/consul-template/templates/rabbitmq/{{ item | basename }}"
+    mode: "0644"
+    owner: rabbitmq
+    group: rabbitmq
+  with_fileglob:
+    - ../templates/etc/consul-template/templates/rabbitmq/*.ctmpl
+  register: consul_template_rabbitmq_templates
+
+- name: Consul Template for RabbitMQ SystemD
+  ansible.builtin.template:
+    src: etc/systemd/system/consul-template-rabbitmq.service
+    dest: /etc/systemd/system/consul-template-rabbitmq.service
+    mode: "0644"
+  register: consul_template_rabbitmq_systemd
+
+- name: Consul Template for RabbitMQ systemd # noqa: no-handler
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: consul_template_rabbitmq_systemd.changed
+
+- name: Start and enable Consul Template for RabbitMQ
+  ansible.builtin.systemd:
+    name: consul-template-rabbitmq
+    state: started
+    enabled: true
+
+- name: Restart Consul Template for RabbitMQ if config changed # noqa: no-handler
+  ansible.builtin.systemd:
+    name: consul-template-rabbitmq
+    state: reloaded
+  when: consul_template_rabbitmq_templates.changed or
+    consul_template_rabbitmq_config.changed or
+    consul_template_rabbitmq_templates_files.changed
+# End Consul Template RabbitMQ
+
+# TODO: remove this
 - name: Restart RabbitMQ Service # noqa: no-handler
   ansible.builtin.systemd_service:
     name: rabbitmq-server
     state: restarted
   when: rabbitmq_plugins.changed or
     rabbitmq_env.changed or
-    rabbitmq_config.changed or
-    rabbitmq_cookie.changed
+    rabbitmq_inter_node_tls_config.changed
 # End RabbitMQ
