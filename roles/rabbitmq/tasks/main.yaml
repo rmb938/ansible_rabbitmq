@@ -1,4 +1,19 @@
 ---
+- name: RabbitMQ Prometheus Service Consul Config
+  ansible.builtin.template:
+    src: etc/consul.d/50_rabbitmq_prometheus.service.hcl
+    dest: /etc/consul.d/50_rabbitmq_prometheus..service.hcl
+    mode: "0644"
+    owner: consul
+    group: consul
+  register: rabbitmq_prometheus_service_consul_config
+
+- name: Restart Consul # noqa: no-handler
+  ansible.builtin.systemd_service:
+    name: consul
+    state: restarted
+  when: rabbitmq_prometheus_service_consul_config.changed
+
 - name: Create datavg
   community.general.lvg:
     vg: data
