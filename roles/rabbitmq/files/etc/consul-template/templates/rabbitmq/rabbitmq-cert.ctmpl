@@ -1,0 +1,6 @@
+{{ $myRabbitMQCluster := (mustEnv "CONSUL_ROLE") }}
+{{- with pkiCert (printf "pki_%s_intermediate/issue/server" ($myRabbitMQCluster | replaceAll "-" "_")) (printf "common_name=%s.service.consul" $myRabbitMQCluster) -}}
+{{ .Cert }}{{ .CA }}{{ .CAChain }}{{ .Key }}
+{{ .Key | writeToFile "/etc/rabbitmq/rabbitmq-server.key" "" "" "0600" }}
+{{ (printf "%s%s" .Cert (.CAChain | join "")) | writeToFile "/etc/rabbitmq/rabbitmq-server.crt" "" "" "0644" }}
+{{- end -}}

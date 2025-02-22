@@ -66,3 +66,25 @@ template {
     command = "sudo systemctl reload-or-restart rabbitmq-server || true"
   }
 }
+
+# RabbitMQ AMPQ CA
+template {
+  source = "/etc/consul-template/templates/rabbitmq/rabbitmq-ca.crt.ctmpl"
+  destination = "/etc/rabbitmq/rabbitmq-ca.crt"
+  create_dest_dirs = false
+  perms = "0644"
+  exec {
+    command = "sudo systemctl reload-or-restart rabbitmq-server || true"
+  }
+}
+
+# RabbitMQ AMPQ Cert
+template {
+  source = "/etc/consul-template/templates/rabbitmq/rabbitmq-cert.ctmpl"
+  destination = "/etc/rabbitmq/rabbitmq-cert.rendered"
+  create_dest_dirs = false
+  perms = "0600"
+  exec {
+    command = "sudo systemctl reload-or-restart rabbitmq-server || true"
+  }
+}
