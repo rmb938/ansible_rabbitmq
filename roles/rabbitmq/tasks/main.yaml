@@ -171,8 +171,8 @@
 - name: Make Sure Erlang SSL Exists
   ansible.builtin.stat:
     # This will change between erlang versions so we want this to fail
-    # if it doesn't
-    path: /usr/lib/erlang/lib/ssl-11.2.7/ebin
+    # if it doesn't exit
+    path: /usr/lib/erlang/lib/ssl-11.2.8/ebin
   register: erlang_ssl
 
 - name: Failing if Erlang SSL doesn't exist # noqa: no-handler
